@@ -39,6 +39,10 @@ struct Args {
     #[arg(long, env = "JAILBREAK_DETECTION", default_value = "true")]
     jailbreak_detection: bool,
 
+    /// Enable JSON schema validation
+    #[arg(long, env = "SCHEMA_VALIDATION", default_value = "false")]
+    schema_validation: bool,
+
     /// Comma-separated list of allowed models (empty = allow all)
     #[arg(long, env = "ALLOWED_MODELS", default_value = "")]
     allowed_models: String,
@@ -100,6 +104,7 @@ async fn main() -> Result<()> {
         pii_detection_enabled: args.pii_detection,
         pii_action,
         jailbreak_detection_enabled: args.jailbreak_detection,
+        schema_validation_enabled: args.schema_validation,
         max_tokens_per_request: if args.max_tokens == 0 {
             None
         } else {
@@ -123,6 +128,7 @@ async fn main() -> Result<()> {
         "  Jailbreak detection: {}",
         config.jailbreak_detection_enabled
     );
+    info!("  Schema validation: {}", config.schema_validation_enabled);
     info!("  Max tokens: {:?}", config.max_tokens_per_request);
     info!("  Block mode: {}", config.block_mode);
     info!("  Fail open: {}", config.fail_open);

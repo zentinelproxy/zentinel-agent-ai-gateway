@@ -10,6 +10,9 @@ An AI gateway agent for [Sentinel](https://sentinel.raskell.io) reverse proxy th
 - **Jailbreak Detection**: Detects attempts to bypass AI safety measures (DAN, developer mode, etc.)
 - **PII Detection**: Detects personally identifiable information (email, SSN, phone, credit card)
   - Configurable actions: block, log, or redact (coming soon)
+- **Schema Validation**: Validates requests against OpenAI and Anthropic JSON schemas
+  - Catches malformed requests before they reach the AI provider
+  - Validates required fields, data types, and value constraints
 
 ### Usage Control
 
@@ -67,6 +70,7 @@ All CLI options can be configured via environment variables:
 | `--pii-detection` | `PII_DETECTION` | Enable PII detection | `true` |
 | `--pii-action` | `PII_ACTION` | Action on PII: block/redact/log | `log` |
 | `--jailbreak-detection` | `JAILBREAK_DETECTION` | Enable jailbreak detection | `true` |
+| `--schema-validation` | `SCHEMA_VALIDATION` | Enable JSON schema validation | `false` |
 | `--allowed-models` | `ALLOWED_MODELS` | Comma-separated model allowlist | (all) |
 | `--max-tokens` | `MAX_TOKENS` | Max tokens per request (0 = no limit) | `0` |
 | `--add-cost-headers` | `ADD_COST_HEADERS` | Add cost estimation headers | `true` |
@@ -107,6 +111,8 @@ The agent adds the following headers to requests:
 | `X-AI-Gateway-Tokens-Estimated` | Estimated token count |
 | `X-AI-Gateway-Cost-Estimated` | Estimated cost in USD |
 | `X-AI-Gateway-PII-Detected` | Comma-separated PII types found |
+| `X-AI-Gateway-Schema-Valid` | `true` or `false` (when validation enabled) |
+| `X-AI-Gateway-Schema-Errors` | Validation errors (if schema invalid) |
 | `X-AI-Gateway-Blocked` | `true` if request was blocked |
 | `X-AI-Gateway-Blocked-Reason` | Reason for blocking |
 
@@ -139,6 +145,23 @@ Detects:
 - Credit card numbers
 - Public IP addresses
 
+### Schema Validation
+
+Validates requests against JSON schemas for:
+
+**OpenAI Chat Completions:**
+- Required: `model`, `messages` (non-empty array)
+- Messages: `role` must be system/user/assistant/tool/function
+- Optional: `temperature` (0-2), `top_p` (0-1), `max_tokens`, etc.
+
+**OpenAI Legacy Completions:**
+- Required: `model`, `prompt`
+
+**Anthropic Messages:**
+- Required: `model`, `max_tokens`, `messages` (non-empty array)
+- Messages: `role` must be user/assistant (no system role in messages)
+- Optional: `system` (separate field), `temperature` (0-1), etc.
+
 ## Supported AI Providers
 
 | Provider | Detection | Paths |
@@ -160,6 +183,7 @@ let config = AiGatewayConfig {
     pii_detection_enabled: true,
     pii_action: PiiAction::Block,
     jailbreak_detection_enabled: true,
+    schema_validation_enabled: true,
     max_tokens_per_request: Some(4000),
     allowed_models: vec!["gpt-4".to_string()],
     block_mode: true,

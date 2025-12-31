@@ -2,6 +2,7 @@
 
 pub mod anthropic;
 pub mod openai;
+pub mod schema;
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

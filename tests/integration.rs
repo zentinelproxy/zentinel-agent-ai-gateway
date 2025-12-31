@@ -902,3 +902,295 @@ async fn test_pii_disabled() {
     client.close().await.unwrap();
     handle.abort();
 }
+
+// ============================================================================
+// Schema Validation Tests
+// ============================================================================
+
+#[tokio::test]
+async fn test_schema_validation_valid_openai_request() {
+    let config = AiGatewayConfig {
+        schema_validation_enabled: true,
+        prompt_injection_enabled: false,
+        jailbreak_detection_enabled: false,
+        ..Default::default()
+    };
+    let (mut client, handle) = start_agent(config).await;
+
+    let body = openai_request("gpt-4", &[("user", "Hello, world!")]);
+
+    let response = send_request(
+        &mut client,
+        "test-28",
+        "/v1/chat/completions",
+        &body,
+        HashMap::new(),
+    )
+    .await;
+
+    assert!(matches!(response.decision, Decision::Allow));
+    // Check schema-valid header is added
+    let schema_valid = response
+        .request_headers
+        .iter()
+        .find(|op| matches!(op, sentinel_agent_protocol::HeaderOp::Set { name, .. } if name == "X-AI-Gateway-Schema-Valid"));
+    assert!(schema_valid.is_some());
+    client.close().await.unwrap();
+    handle.abort();
+}
+
+#[tokio::test]
+async fn test_schema_validation_missing_model_blocked() {
+    let config = AiGatewayConfig {
+        schema_validation_enabled: true,
+        prompt_injection_enabled: false,
+        jailbreak_detection_enabled: false,
+        ..Default::default()
+    };
+    let (mut client, handle) = start_agent(config).await;
+
+    // Missing required 'model' field
+    let body = r#"{"messages": [{"role": "user", "content": "Hello"}]}"#;
+
+    let response = send_request(
+        &mut client,
+        "test-29",
+        "/v1/chat/completions",
+        body,
+        HashMap::new(),
+    )
+    .await;
+
+    assert!(matches!(
+        response.decision,
+        Decision::Block { status: 400, .. }
+    ));
+    client.close().await.unwrap();
+    handle.abort();
+}
+
+#[tokio::test]
+async fn test_schema_validation_empty_messages_blocked() {
+    let config = AiGatewayConfig {
+        schema_validation_enabled: true,
+        prompt_injection_enabled: false,
+        jailbreak_detection_enabled: false,
+        ..Default::default()
+    };
+    let (mut client, handle) = start_agent(config).await;
+
+    // Empty messages array (violates minItems: 1)
+    let body = r#"{"model": "gpt-4", "messages": []}"#;
+
+    let response = send_request(
+        &mut client,
+        "test-30",
+        "/v1/chat/completions",
+        body,
+        HashMap::new(),
+    )
+    .await;
+
+    assert!(matches!(
+        response.decision,
+        Decision::Block { status: 400, .. }
+    ));
+    client.close().await.unwrap();
+    handle.abort();
+}
+
+#[tokio::test]
+async fn test_schema_validation_invalid_role_blocked() {
+    let config = AiGatewayConfig {
+        schema_validation_enabled: true,
+        prompt_injection_enabled: false,
+        jailbreak_detection_enabled: false,
+        ..Default::default()
+    };
+    let (mut client, handle) = start_agent(config).await;
+
+    // Invalid role (not in enum)
+    let body = r#"{"model": "gpt-4", "messages": [{"role": "hacker", "content": "Hello"}]}"#;
+
+    let response = send_request(
+        &mut client,
+        "test-31",
+        "/v1/chat/completions",
+        body,
+        HashMap::new(),
+    )
+    .await;
+
+    assert!(matches!(
+        response.decision,
+        Decision::Block { status: 400, .. }
+    ));
+    client.close().await.unwrap();
+    handle.abort();
+}
+
+#[tokio::test]
+async fn test_schema_validation_invalid_temperature_blocked() {
+    let config = AiGatewayConfig {
+        schema_validation_enabled: true,
+        prompt_injection_enabled: false,
+        jailbreak_detection_enabled: false,
+        ..Default::default()
+    };
+    let (mut client, handle) = start_agent(config).await;
+
+    // Temperature out of range (max is 2)
+    let body = r#"{"model": "gpt-4", "messages": [{"role": "user", "content": "Hello"}], "temperature": 5.0}"#;
+
+    let response = send_request(
+        &mut client,
+        "test-32",
+        "/v1/chat/completions",
+        body,
+        HashMap::new(),
+    )
+    .await;
+
+    assert!(matches!(
+        response.decision,
+        Decision::Block { status: 400, .. }
+    ));
+    client.close().await.unwrap();
+    handle.abort();
+}
+
+#[tokio::test]
+async fn test_schema_validation_valid_anthropic_request() {
+    let config = AiGatewayConfig {
+        schema_validation_enabled: true,
+        prompt_injection_enabled: false,
+        jailbreak_detection_enabled: false,
+        ..Default::default()
+    };
+    let (mut client, handle) = start_agent(config).await;
+
+    let body = anthropic_request("claude-3-opus-20240229", &[("user", "Hello!")], None);
+
+    let response = send_request(
+        &mut client,
+        "test-33",
+        "/v1/messages",
+        &body,
+        HashMap::new(),
+    )
+    .await;
+
+    assert!(matches!(response.decision, Decision::Allow));
+    client.close().await.unwrap();
+    handle.abort();
+}
+
+#[tokio::test]
+async fn test_schema_validation_anthropic_missing_max_tokens_blocked() {
+    let config = AiGatewayConfig {
+        schema_validation_enabled: true,
+        prompt_injection_enabled: false,
+        jailbreak_detection_enabled: false,
+        ..Default::default()
+    };
+    let (mut client, handle) = start_agent(config).await;
+
+    // Anthropic requires max_tokens
+    let body = r#"{"model": "claude-3-opus", "messages": [{"role": "user", "content": "Hello"}]}"#;
+
+    let response = send_request(&mut client, "test-34", "/v1/messages", body, HashMap::new()).await;
+
+    assert!(matches!(
+        response.decision,
+        Decision::Block { status: 400, .. }
+    ));
+    client.close().await.unwrap();
+    handle.abort();
+}
+
+#[tokio::test]
+async fn test_schema_validation_disabled_allows_invalid() {
+    let config = AiGatewayConfig {
+        schema_validation_enabled: false, // Disabled
+        prompt_injection_enabled: false,
+        jailbreak_detection_enabled: false,
+        ..Default::default()
+    };
+    let (mut client, handle) = start_agent(config).await;
+
+    // Invalid request (missing model)
+    let body = r#"{"messages": [{"role": "user", "content": "Hello"}]}"#;
+
+    let response = send_request(
+        &mut client,
+        "test-35",
+        "/v1/chat/completions",
+        body,
+        HashMap::new(),
+    )
+    .await;
+
+    // Should allow when validation is disabled
+    assert!(matches!(response.decision, Decision::Allow));
+    client.close().await.unwrap();
+    handle.abort();
+}
+
+#[tokio::test]
+async fn test_schema_validation_detect_only_mode() {
+    let config = AiGatewayConfig {
+        schema_validation_enabled: true,
+        block_mode: false, // Detect-only
+        prompt_injection_enabled: false,
+        jailbreak_detection_enabled: false,
+        ..Default::default()
+    };
+    let (mut client, handle) = start_agent(config).await;
+
+    // Invalid request (missing model) - should log but allow
+    let body = r#"{"messages": [{"role": "user", "content": "Hello"}]}"#;
+
+    let response = send_request(
+        &mut client,
+        "test-36",
+        "/v1/chat/completions",
+        body,
+        HashMap::new(),
+    )
+    .await;
+
+    // Should allow in detect-only mode
+    assert!(matches!(response.decision, Decision::Allow));
+    client.close().await.unwrap();
+    handle.abort();
+}
+
+#[tokio::test]
+async fn test_schema_validation_invalid_json_blocked() {
+    let config = AiGatewayConfig {
+        schema_validation_enabled: true,
+        prompt_injection_enabled: false,
+        jailbreak_detection_enabled: false,
+        ..Default::default()
+    };
+    let (mut client, handle) = start_agent(config).await;
+
+    // Malformed JSON
+    let body = r#"{"model": "gpt-4", "messages": ["#;
+
+    let response = send_request(
+        &mut client,
+        "test-37",
+        "/v1/chat/completions",
+        body,
+        HashMap::new(),
+    )
+    .await;
+
+    assert!(matches!(
+        response.decision,
+        Decision::Block { status: 400, .. }
+    ));
+    client.close().await.unwrap();
+    handle.abort();
+}

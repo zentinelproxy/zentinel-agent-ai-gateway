@@ -59,6 +59,8 @@ pub struct AiGatewayConfig {
     pub pii_action: PiiAction,
     /// Enable jailbreak detection
     pub jailbreak_detection_enabled: bool,
+    /// Enable JSON schema validation
+    pub schema_validation_enabled: bool,
     /// Maximum tokens per request (None = no limit)
     pub max_tokens_per_request: Option<u32>,
     /// Add cost estimation headers
@@ -78,6 +80,7 @@ impl Default for AiGatewayConfig {
             pii_detection_enabled: true,
             pii_action: PiiAction::Log,
             jailbreak_detection_enabled: true,
+            schema_validation_enabled: false,
             max_tokens_per_request: None,
             add_cost_headers: true,
             allowed_models: Vec::new(),
@@ -144,6 +147,36 @@ impl AiGatewayAgent {
             }
         };
 
+        // Schema validation (before parsing)
+        if self.config.schema_validation_enabled {
+            let validation = providers::schema::validate_request(state.provider, &body_str);
+            if !validation.valid {
+                let errors_str = validation.errors.join("; ");
+                warn!("Schema validation failed: {}", errors_str);
+
+                if self.config.block_mode {
+                    return AgentResponse::block(400, Some("Schema validation failed".to_string()))
+                        .add_response_header(HeaderOp::Set {
+                            name: "X-AI-Gateway-Schema-Valid".to_string(),
+                            value: "false".to_string(),
+                        })
+                        .add_response_header(HeaderOp::Set {
+                            name: "X-AI-Gateway-Schema-Errors".to_string(),
+                            value: errors_str.clone(),
+                        })
+                        .with_audit(AuditMetadata {
+                            tags: vec![
+                                "ai-gateway".to_string(),
+                                "blocked".to_string(),
+                                "schema-invalid".to_string(),
+                            ],
+                            reason_codes: vec!["SCHEMA_VALIDATION_FAILED".to_string()],
+                            ..Default::default()
+                        });
+                }
+            }
+        }
+
         // Parse the AI request
         let ai_request = match providers::parse_request(state.provider, &body_str) {
             Some(req) => req,
@@ -158,11 +191,16 @@ impl AiGatewayAgent {
         };
 
         // Build response with checks
-        self.check_request(&ai_request, &state.provider)
+        self.check_request(&ai_request, &state.provider, &body_str)
     }
 
     /// Run all security checks on the parsed AI request
-    fn check_request(&self, request: &AiRequest, provider: &AiProvider) -> AgentResponse {
+    fn check_request(
+        &self,
+        request: &AiRequest,
+        provider: &AiProvider,
+        body: &str,
+    ) -> AgentResponse {
         let mut response = AgentResponse::default_allow();
         let mut blocked = false;
         let mut block_reason = String::new();
@@ -182,6 +220,18 @@ impl AiGatewayAgent {
                 value: model.clone(),
             });
             tags.push(format!("model:{}", model));
+        }
+
+        // Add schema validation header if enabled
+        if self.config.schema_validation_enabled {
+            let validation = providers::schema::validate_request(*provider, body);
+            response = response.add_request_header(HeaderOp::Set {
+                name: "X-AI-Gateway-Schema-Valid".to_string(),
+                value: validation.valid.to_string(),
+            });
+            if validation.valid {
+                tags.push("schema-valid".to_string());
+            }
         }
 
         // Check model allowlist
