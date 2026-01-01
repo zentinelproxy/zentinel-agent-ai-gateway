@@ -5,10 +5,12 @@
 //! - PII detection and redaction
 //! - Jailbreak attempt detection
 //! - Usage control (token limits, cost estimation)
+//! - Rate limiting (requests/tokens per minute)
 //! - Model validation and routing
 
 pub mod detection;
 pub mod providers;
+pub mod ratelimit;
 
 use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
@@ -71,6 +73,10 @@ pub struct AiGatewayConfig {
     pub block_mode: bool,
     /// Fail open on errors
     pub fail_open: bool,
+    /// Rate limit: requests per minute per client (0 = unlimited)
+    pub rate_limit_requests: u32,
+    /// Rate limit: tokens per minute per client (0 = unlimited)
+    pub rate_limit_tokens: u32,
 }
 
 impl Default for AiGatewayConfig {
@@ -86,6 +92,8 @@ impl Default for AiGatewayConfig {
             allowed_models: Vec::new(),
             block_mode: true,
             fail_open: false,
+            rate_limit_requests: 0,
+            rate_limit_tokens: 0,
         }
     }
 }
@@ -97,6 +105,8 @@ struct RequestState {
     provider: AiProvider,
     /// Accumulated body chunks
     body_chunks: Vec<Vec<u8>>,
+    /// Client IP for rate limiting
+    client_ip: String,
 }
 
 /// AI Gateway Agent
@@ -105,6 +115,7 @@ pub struct AiGatewayAgent {
     prompt_injection_detector: PromptInjectionDetector,
     pii_detector: PiiDetector,
     jailbreak_detector: JailbreakDetector,
+    rate_limiter: ratelimit::RateLimiter,
     /// Per-request state, keyed by correlation ID
     requests: Arc<Mutex<HashMap<String, RequestState>>>,
 }
@@ -112,17 +123,24 @@ pub struct AiGatewayAgent {
 impl AiGatewayAgent {
     /// Create a new AI Gateway agent with the given configuration
     pub fn new(config: AiGatewayConfig) -> Self {
+        let rate_limit_config = ratelimit::RateLimitConfig {
+            requests_per_minute: config.rate_limit_requests,
+            tokens_per_minute: config.rate_limit_tokens,
+            ..Default::default()
+        };
+
         Self {
-            config,
             prompt_injection_detector: PromptInjectionDetector::new(),
             pii_detector: PiiDetector::new(),
             jailbreak_detector: JailbreakDetector::new(),
+            rate_limiter: ratelimit::RateLimiter::new(rate_limit_config),
             requests: Arc::new(Mutex::new(HashMap::new())),
+            config,
         }
     }
 
     /// Process the complete request body
-    fn process_body(&self, state: &RequestState) -> AgentResponse {
+    async fn process_body(&self, state: &RequestState) -> AgentResponse {
         // Combine body chunks
         let full_body: Vec<u8> = state.body_chunks.iter().flatten().copied().collect();
         let body_str = match String::from_utf8(full_body) {
@@ -191,15 +209,17 @@ impl AiGatewayAgent {
         };
 
         // Build response with checks
-        self.check_request(&ai_request, &state.provider, &body_str)
+        self.check_request(&ai_request, &state.provider, &body_str, &state.client_ip)
+            .await
     }
 
     /// Run all security checks on the parsed AI request
-    fn check_request(
+    async fn check_request(
         &self,
         request: &AiRequest,
         provider: &AiProvider,
         body: &str,
+        client_ip: &str,
     ) -> AgentResponse {
         let mut response = AgentResponse::default_allow();
         let mut blocked = false;
@@ -282,6 +302,84 @@ impl AiGatewayAgent {
                 name: "X-AI-Gateway-Cost-Estimated".to_string(),
                 value: format!("{:.6}", cost),
             });
+        }
+
+        // Rate limiting
+        if self.config.rate_limit_requests > 0 || self.config.rate_limit_tokens > 0 {
+            let rate_result = self
+                .rate_limiter
+                .check_and_record(client_ip, estimated_tokens)
+                .await;
+
+            // Add rate limit headers
+            if self.config.rate_limit_requests > 0 {
+                response = response.add_response_header(HeaderOp::Set {
+                    name: "X-RateLimit-Limit-Requests".to_string(),
+                    value: rate_result.request_limit.to_string(),
+                });
+                response = response.add_response_header(HeaderOp::Set {
+                    name: "X-RateLimit-Remaining-Requests".to_string(),
+                    value: rate_result
+                        .request_limit
+                        .saturating_sub(rate_result.request_count)
+                        .to_string(),
+                });
+            }
+            if self.config.rate_limit_tokens > 0 {
+                response = response.add_response_header(HeaderOp::Set {
+                    name: "X-RateLimit-Limit-Tokens".to_string(),
+                    value: rate_result.token_limit.to_string(),
+                });
+                response = response.add_response_header(HeaderOp::Set {
+                    name: "X-RateLimit-Remaining-Tokens".to_string(),
+                    value: rate_result
+                        .token_limit
+                        .saturating_sub(rate_result.token_count)
+                        .to_string(),
+                });
+            }
+            response = response.add_response_header(HeaderOp::Set {
+                name: "X-RateLimit-Reset".to_string(),
+                value: rate_result.reset_seconds.to_string(),
+            });
+
+            if !rate_result.allowed {
+                let limit_type = match rate_result.exceeded_limit {
+                    Some(ratelimit::ExceededLimit::Requests) => "requests",
+                    Some(ratelimit::ExceededLimit::Tokens) => "tokens",
+                    None => "unknown",
+                };
+                warn!(
+                    client_ip = client_ip,
+                    limit_type = limit_type,
+                    "Rate limit exceeded"
+                );
+                tags.push("rate-limited".to_string());
+                reason_codes.push("RATE_LIMIT_EXCEEDED".to_string());
+
+                return AgentResponse::block(429, Some("Too Many Requests".to_string()))
+                    .add_response_header(HeaderOp::Set {
+                        name: "X-RateLimit-Limit-Requests".to_string(),
+                        value: rate_result.request_limit.to_string(),
+                    })
+                    .add_response_header(HeaderOp::Set {
+                        name: "X-RateLimit-Remaining-Requests".to_string(),
+                        value: "0".to_string(),
+                    })
+                    .add_response_header(HeaderOp::Set {
+                        name: "X-RateLimit-Reset".to_string(),
+                        value: rate_result.reset_seconds.to_string(),
+                    })
+                    .add_response_header(HeaderOp::Set {
+                        name: "Retry-After".to_string(),
+                        value: rate_result.reset_seconds.to_string(),
+                    })
+                    .with_audit(AuditMetadata {
+                        tags,
+                        reason_codes,
+                        ..Default::default()
+                    });
+            }
         }
 
         // Get all content for scanning
@@ -400,6 +498,7 @@ impl AgentHandler for AiGatewayAgent {
             RequestState {
                 provider,
                 body_chunks: Vec::new(),
+                client_ip: event.metadata.client_ip.clone(),
             },
         );
 
@@ -430,7 +529,9 @@ impl AgentHandler for AiGatewayAgent {
                 "Processing complete request body"
             );
             let state = requests.remove(&event.correlation_id).unwrap();
-            return self.process_body(&state);
+            // Drop the lock before async processing
+            drop(requests);
+            return self.process_body(&state).await;
         }
 
         AgentResponse::default_allow()

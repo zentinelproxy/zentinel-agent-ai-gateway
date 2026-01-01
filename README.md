@@ -16,6 +16,10 @@ An AI gateway agent for [Sentinel](https://sentinel.raskell.io) reverse proxy th
 
 ### Usage Control
 
+- **Rate Limiting**: Per-client rate limits for requests and tokens
+  - Requests per minute
+  - Tokens per minute (estimated)
+  - Returns 429 with Retry-After header when exceeded
 - **Token Limits**: Enforce maximum tokens per request
 - **Cost Estimation**: Add headers with estimated cost based on model pricing
 - **Model Allowlist**: Restrict which AI models can be used
@@ -76,6 +80,8 @@ All CLI options can be configured via environment variables:
 | `--add-cost-headers` | `ADD_COST_HEADERS` | Add cost estimation headers | `true` |
 | `--block-mode` | `BLOCK_MODE` | Block or detect-only | `true` |
 | `--fail-open` | `FAIL_OPEN` | Allow on errors | `false` |
+| `--rate-limit-requests` | `RATE_LIMIT_REQUESTS` | Requests per minute per client | `0` (unlimited) |
+| `--rate-limit-tokens` | `RATE_LIMIT_TOKENS` | Tokens per minute per client | `0` (unlimited) |
 | `--verbose` | `VERBOSE` | Enable debug logging | `false` |
 
 ## Sentinel Configuration
@@ -115,6 +121,12 @@ The agent adds the following headers to requests:
 | `X-AI-Gateway-Schema-Errors` | Validation errors (if schema invalid) |
 | `X-AI-Gateway-Blocked` | `true` if request was blocked |
 | `X-AI-Gateway-Blocked-Reason` | Reason for blocking |
+| `X-RateLimit-Limit-Requests` | Request limit per minute |
+| `X-RateLimit-Remaining-Requests` | Requests remaining in window |
+| `X-RateLimit-Limit-Tokens` | Token limit per minute |
+| `X-RateLimit-Remaining-Tokens` | Tokens remaining in window |
+| `X-RateLimit-Reset` | Seconds until window resets |
+| `Retry-After` | Seconds to wait (when rate limited) |
 
 ## Detection Patterns
 
@@ -188,6 +200,8 @@ let config = AiGatewayConfig {
     allowed_models: vec!["gpt-4".to_string()],
     block_mode: true,
     fail_open: false,
+    rate_limit_requests: 60,   // 60 requests per minute
+    rate_limit_tokens: 100000, // 100k tokens per minute
     ..Default::default()
 };
 

@@ -63,6 +63,14 @@ struct Args {
     #[arg(long, env = "FAIL_OPEN", default_value = "false")]
     fail_open: bool,
 
+    /// Rate limit: requests per minute per client (0 = unlimited)
+    #[arg(long, env = "RATE_LIMIT_REQUESTS", default_value = "0")]
+    rate_limit_requests: u32,
+
+    /// Rate limit: tokens per minute per client (0 = unlimited)
+    #[arg(long, env = "RATE_LIMIT_TOKENS", default_value = "0")]
+    rate_limit_tokens: u32,
+
     /// Enable verbose debug logging
     #[arg(long, short, env = "VERBOSE", default_value = "false")]
     verbose: bool,
@@ -114,6 +122,8 @@ async fn main() -> Result<()> {
         allowed_models,
         block_mode: args.block_mode,
         fail_open: args.fail_open,
+        rate_limit_requests: args.rate_limit_requests,
+        rate_limit_tokens: args.rate_limit_tokens,
     };
 
     info!("Starting AI Gateway Agent");
@@ -132,6 +142,13 @@ async fn main() -> Result<()> {
     info!("  Max tokens: {:?}", config.max_tokens_per_request);
     info!("  Block mode: {}", config.block_mode);
     info!("  Fail open: {}", config.fail_open);
+
+    if config.rate_limit_requests > 0 || config.rate_limit_tokens > 0 {
+        info!(
+            "  Rate limit: {} req/min, {} tokens/min",
+            config.rate_limit_requests, config.rate_limit_tokens
+        );
+    }
 
     if !config.allowed_models.is_empty() {
         info!("  Allowed models: {:?}", config.allowed_models);
