@@ -17,12 +17,13 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use detection::{JailbreakDetector, PiiDetector, PiiType, PromptInjectionDetector};
 use providers::{AiProvider, AiRequest};
 use sentinel_agent_protocol::{
-    AgentHandler, AgentResponse, AuditMetadata, HeaderOp, RequestBodyChunkEvent,
+    AgentHandler, AgentResponse, AuditMetadata, ConfigureEvent, HeaderOp, RequestBodyChunkEvent,
     RequestHeadersEvent,
 };
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, info, warn};
 
 /// Action to take when PII is detected
@@ -46,6 +47,97 @@ impl std::str::FromStr for PiiAction {
             "redact" => Ok(PiiAction::Redact),
             "log" => Ok(PiiAction::Log),
             _ => Err(format!("Invalid PII action: {}", s)),
+        }
+    }
+}
+
+/// JSON-serializable configuration for the AI Gateway agent
+///
+/// Used for parsing configuration from the on_configure() event.
+/// Field names use kebab-case to match typical YAML/JSON config style.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct AiGatewayConfigJson {
+    /// Enable prompt injection detection
+    #[serde(default = "default_true")]
+    pub prompt_injection_enabled: bool,
+    /// Enable PII detection
+    #[serde(default = "default_true")]
+    pub pii_detection_enabled: bool,
+    /// Action to take on PII detection: "block", "redact", or "log"
+    #[serde(default)]
+    pub pii_action: String,
+    /// Enable jailbreak detection
+    #[serde(default = "default_true")]
+    pub jailbreak_detection_enabled: bool,
+    /// Enable JSON schema validation
+    #[serde(default)]
+    pub schema_validation_enabled: bool,
+    /// Maximum tokens per request (None = no limit)
+    #[serde(default)]
+    pub max_tokens_per_request: Option<u32>,
+    /// Add cost estimation headers
+    #[serde(default = "default_true")]
+    pub add_cost_headers: bool,
+    /// Allowed models (empty = allow all)
+    #[serde(default)]
+    pub allowed_models: Vec<String>,
+    /// Block mode (false = detect-only, log but don't block)
+    #[serde(default = "default_true")]
+    pub block_mode: bool,
+    /// Fail open on errors
+    #[serde(default)]
+    pub fail_open: bool,
+    /// Rate limit: requests per minute per client (0 = unlimited)
+    #[serde(default)]
+    pub rate_limit_requests: u32,
+    /// Rate limit: tokens per minute per client (0 = unlimited)
+    #[serde(default)]
+    pub rate_limit_tokens: u32,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for AiGatewayConfigJson {
+    fn default() -> Self {
+        Self {
+            prompt_injection_enabled: true,
+            pii_detection_enabled: true,
+            pii_action: "log".to_string(),
+            jailbreak_detection_enabled: true,
+            schema_validation_enabled: false,
+            max_tokens_per_request: None,
+            add_cost_headers: true,
+            allowed_models: Vec::new(),
+            block_mode: true,
+            fail_open: false,
+            rate_limit_requests: 0,
+            rate_limit_tokens: 0,
+        }
+    }
+}
+
+impl From<AiGatewayConfigJson> for AiGatewayConfig {
+    fn from(json: AiGatewayConfigJson) -> Self {
+        let pii_action = json
+            .pii_action
+            .parse::<PiiAction>()
+            .unwrap_or(PiiAction::Log);
+        Self {
+            prompt_injection_enabled: json.prompt_injection_enabled,
+            pii_detection_enabled: json.pii_detection_enabled,
+            pii_action,
+            jailbreak_detection_enabled: json.jailbreak_detection_enabled,
+            schema_validation_enabled: json.schema_validation_enabled,
+            max_tokens_per_request: json.max_tokens_per_request,
+            add_cost_headers: json.add_cost_headers,
+            allowed_models: json.allowed_models,
+            block_mode: json.block_mode,
+            fail_open: json.fail_open,
+            rate_limit_requests: json.rate_limit_requests,
+            rate_limit_tokens: json.rate_limit_tokens,
         }
     }
 }
@@ -111,11 +203,11 @@ struct RequestState {
 
 /// AI Gateway Agent
 pub struct AiGatewayAgent {
-    config: AiGatewayConfig,
+    config: RwLock<AiGatewayConfig>,
     prompt_injection_detector: PromptInjectionDetector,
     pii_detector: PiiDetector,
     jailbreak_detector: JailbreakDetector,
-    rate_limiter: ratelimit::RateLimiter,
+    rate_limiter: RwLock<ratelimit::RateLimiter>,
     /// Per-request state, keyed by correlation ID
     requests: Arc<Mutex<HashMap<String, RequestState>>>,
 }
@@ -133,21 +225,51 @@ impl AiGatewayAgent {
             prompt_injection_detector: PromptInjectionDetector::new(),
             pii_detector: PiiDetector::new(),
             jailbreak_detector: JailbreakDetector::new(),
-            rate_limiter: ratelimit::RateLimiter::new(rate_limit_config),
+            rate_limiter: RwLock::new(ratelimit::RateLimiter::new(rate_limit_config)),
             requests: Arc::new(Mutex::new(HashMap::new())),
-            config,
+            config: RwLock::new(config),
         }
+    }
+
+    /// Reconfigure the agent with new settings
+    ///
+    /// This allows dynamic reconfiguration without restarting the agent.
+    pub async fn reconfigure(&self, config: AiGatewayConfig) {
+        info!("Reconfiguring AI Gateway agent");
+
+        // Update rate limiter with new config
+        let rate_limit_config = ratelimit::RateLimitConfig {
+            requests_per_minute: config.rate_limit_requests,
+            tokens_per_minute: config.rate_limit_tokens,
+            ..Default::default()
+        };
+
+        {
+            let mut rate_limiter = self.rate_limiter.write().await;
+            *rate_limiter = ratelimit::RateLimiter::new(rate_limit_config);
+        }
+
+        // Update config
+        {
+            let mut current_config = self.config.write().await;
+            *current_config = config;
+        }
+
+        debug!("AI Gateway agent reconfigured successfully");
     }
 
     /// Process the complete request body
     async fn process_body(&self, state: &RequestState) -> AgentResponse {
+        // Get config snapshot for this request
+        let config = self.config.read().await.clone();
+
         // Combine body chunks
         let full_body: Vec<u8> = state.body_chunks.iter().flatten().copied().collect();
         let body_str = match String::from_utf8(full_body) {
             Ok(s) => s,
             Err(_) => {
                 warn!("Invalid UTF-8 in request body");
-                return if self.config.fail_open {
+                return if config.fail_open {
                     AgentResponse::default_allow().with_audit(AuditMetadata {
                         tags: vec!["ai-gateway".to_string(), "error".to_string()],
                         reason_codes: vec!["INVALID_UTF8".to_string()],
@@ -166,13 +288,13 @@ impl AiGatewayAgent {
         };
 
         // Schema validation (before parsing)
-        if self.config.schema_validation_enabled {
+        if config.schema_validation_enabled {
             let validation = providers::schema::validate_request(state.provider, &body_str);
             if !validation.valid {
                 let errors_str = validation.errors.join("; ");
                 warn!("Schema validation failed: {}", errors_str);
 
-                if self.config.block_mode {
+                if config.block_mode {
                     return AgentResponse::block(400, Some("Schema validation failed".to_string()))
                         .add_response_header(HeaderOp::Set {
                             name: "X-AI-Gateway-Schema-Valid".to_string(),
@@ -209,13 +331,14 @@ impl AiGatewayAgent {
         };
 
         // Build response with checks
-        self.check_request(&ai_request, &state.provider, &body_str, &state.client_ip)
+        self.check_request(&config, &ai_request, &state.provider, &body_str, &state.client_ip)
             .await
     }
 
     /// Run all security checks on the parsed AI request
     async fn check_request(
         &self,
+        config: &AiGatewayConfig,
         request: &AiRequest,
         provider: &AiProvider,
         body: &str,
@@ -243,7 +366,7 @@ impl AiGatewayAgent {
         }
 
         // Add schema validation header if enabled
-        if self.config.schema_validation_enabled {
+        if config.schema_validation_enabled {
             let validation = providers::schema::validate_request(*provider, body);
             response = response.add_request_header(HeaderOp::Set {
                 name: "X-AI-Gateway-Schema-Valid".to_string(),
@@ -255,10 +378,9 @@ impl AiGatewayAgent {
         }
 
         // Check model allowlist
-        if !self.config.allowed_models.is_empty() {
+        if !config.allowed_models.is_empty() {
             if let Some(ref model) = request.model {
-                let model_allowed = self
-                    .config
+                let model_allowed = config
                     .allowed_models
                     .iter()
                     .any(|allowed| model.contains(allowed) || allowed.contains(model));
@@ -273,7 +395,7 @@ impl AiGatewayAgent {
         }
 
         // Check token limits
-        if let Some(max_tokens) = self.config.max_tokens_per_request {
+        if let Some(max_tokens) = config.max_tokens_per_request {
             if let Some(requested_tokens) = request.max_tokens {
                 if requested_tokens > max_tokens {
                     blocked = true;
@@ -296,7 +418,7 @@ impl AiGatewayAgent {
         });
 
         // Add cost estimation if enabled
-        if self.config.add_cost_headers {
+        if config.add_cost_headers {
             let cost = estimate_cost(provider, request.model.as_deref(), estimated_tokens);
             response = response.add_request_header(HeaderOp::Set {
                 name: "X-AI-Gateway-Cost-Estimated".to_string(),
@@ -305,14 +427,16 @@ impl AiGatewayAgent {
         }
 
         // Rate limiting
-        if self.config.rate_limit_requests > 0 || self.config.rate_limit_tokens > 0 {
+        if config.rate_limit_requests > 0 || config.rate_limit_tokens > 0 {
             let rate_result = self
                 .rate_limiter
+                .read()
+                .await
                 .check_and_record(client_ip, estimated_tokens)
                 .await;
 
             // Add rate limit headers
-            if self.config.rate_limit_requests > 0 {
+            if config.rate_limit_requests > 0 {
                 response = response.add_response_header(HeaderOp::Set {
                     name: "X-RateLimit-Limit-Requests".to_string(),
                     value: rate_result.request_limit.to_string(),
@@ -325,7 +449,7 @@ impl AiGatewayAgent {
                         .to_string(),
                 });
             }
-            if self.config.rate_limit_tokens > 0 {
+            if config.rate_limit_tokens > 0 {
                 response = response.add_response_header(HeaderOp::Set {
                     name: "X-RateLimit-Limit-Tokens".to_string(),
                     value: rate_result.token_limit.to_string(),
@@ -386,7 +510,7 @@ impl AiGatewayAgent {
         let all_content = request.all_content();
 
         // Prompt injection detection
-        if self.config.prompt_injection_enabled && !blocked {
+        if config.prompt_injection_enabled && !blocked {
             if let Some(detection) = self
                 .prompt_injection_detector
                 .detect_any(all_content.iter().copied())
@@ -394,7 +518,7 @@ impl AiGatewayAgent {
                 warn!("Prompt injection detected: {}", detection);
                 tags.push("detected:prompt-injection".to_string());
                 reason_codes.push("PROMPT_INJECTION".to_string());
-                if self.config.block_mode {
+                if config.block_mode {
                     blocked = true;
                     block_reason = detection;
                 }
@@ -402,7 +526,7 @@ impl AiGatewayAgent {
         }
 
         // Jailbreak detection
-        if self.config.jailbreak_detection_enabled && !blocked {
+        if config.jailbreak_detection_enabled && !blocked {
             if let Some(detection) = self
                 .jailbreak_detector
                 .detect_any(all_content.iter().copied())
@@ -410,7 +534,7 @@ impl AiGatewayAgent {
                 warn!("Jailbreak attempt detected: {}", detection);
                 tags.push("detected:jailbreak".to_string());
                 reason_codes.push("JAILBREAK_ATTEMPT".to_string());
-                if self.config.block_mode {
+                if config.block_mode {
                     blocked = true;
                     block_reason = detection;
                 }
@@ -418,7 +542,7 @@ impl AiGatewayAgent {
         }
 
         // PII detection
-        if self.config.pii_detection_enabled {
+        if config.pii_detection_enabled {
             let mut pii_types: Vec<PiiType> = Vec::new();
             for content in &all_content {
                 pii_types.extend(self.pii_detector.detect_types(content));
@@ -441,7 +565,7 @@ impl AiGatewayAgent {
                 tags.push(format!("pii:{}", pii_str));
                 reason_codes.push("PII_DETECTED".to_string());
 
-                if self.config.pii_action == PiiAction::Block && self.config.block_mode {
+                if config.pii_action == PiiAction::Block && config.block_mode {
                     blocked = true;
                     block_reason = format!("pii-detected:{}", pii_str);
                 }
@@ -478,6 +602,26 @@ impl AiGatewayAgent {
 
 #[async_trait]
 impl AgentHandler for AiGatewayAgent {
+    async fn on_configure(&self, event: ConfigureEvent) -> AgentResponse {
+        info!(agent_id = %event.agent_id, "Received configuration event");
+
+        // Parse the JSON config
+        let json_config: AiGatewayConfigJson = match serde_json::from_value(event.config) {
+            Ok(cfg) => cfg,
+            Err(e) => {
+                warn!(error = %e, "Failed to parse configuration, using defaults");
+                AiGatewayConfigJson::default()
+            }
+        };
+
+        // Convert to internal config and apply
+        let new_config: AiGatewayConfig = json_config.into();
+        self.reconfigure(new_config).await;
+
+        debug!("Configuration applied successfully");
+        AgentResponse::default_allow()
+    }
+
     async fn on_request_headers(&self, event: RequestHeadersEvent) -> AgentResponse {
         let correlation_id = event.metadata.correlation_id.clone();
         let mut requests = self.requests.lock().await;
