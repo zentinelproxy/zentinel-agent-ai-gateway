@@ -24,6 +24,7 @@ fn test_metadata(correlation_id: &str) -> RequestMetadata {
         route_id: Some("default".to_string()),
         upstream_id: Some("openai".to_string()),
         timestamp: chrono::Utc::now().to_rfc3339(),
+        traceparent: None,
     }
 }
 
