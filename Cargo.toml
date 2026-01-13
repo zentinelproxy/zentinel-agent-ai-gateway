@@ -9,7 +9,7 @@ repository = "https://github.com/raskell-io/sentinel-agent-ai-gateway"
 homepage = "https://sentinel.raskell.io"
 documentation = "https://sentinel.raskell.io/docs/agents/ai-gateway"
 description = "AI Gateway agent for Sentinel reverse proxy - prompt filtering, PII detection, usage control"
-keywords = ["proxy", "reverse-proxy", "agent", "ai", "llm", "gateway"]
+keywords = ["sentinel", "proxy", "agent", "ai", "llm"]
 categories = ["network-programming", "web-programming"]
 readme = "README.md"
 
