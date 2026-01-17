@@ -16,12 +16,17 @@ use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use detection::{JailbreakDetector, PiiDetector, PiiType, PromptInjectionDetector};
 use providers::{AiProvider, AiRequest};
+use sentinel_agent_protocol::v2::{
+    AgentCapabilities, AgentFeatures, AgentHandlerV2, CounterMetric, DrainReason, GaugeMetric,
+    HealthStatus, MetricsReport, ShutdownReason,
+};
 use sentinel_agent_protocol::{
-    AgentHandler, AgentResponse, AuditMetadata, ConfigureEvent, HeaderOp, RequestBodyChunkEvent,
-    RequestHeadersEvent,
+    AgentHandler, AgentResponse, AuditMetadata, ConfigureEvent, EventType, HeaderOp,
+    RequestBodyChunkEvent, RequestHeadersEvent,
 };
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, info, warn};
@@ -210,6 +215,16 @@ pub struct AiGatewayAgent {
     rate_limiter: RwLock<ratelimit::RateLimiter>,
     /// Per-request state, keyed by correlation ID
     requests: Arc<Mutex<HashMap<String, RequestState>>>,
+    /// Metrics: total requests processed
+    requests_total: AtomicU64,
+    /// Metrics: requests blocked
+    requests_blocked: AtomicU64,
+    /// Metrics: prompt injection detections
+    prompt_injection_detections: AtomicU64,
+    /// Metrics: PII detections
+    pii_detections: AtomicU64,
+    /// Metrics: jailbreak detections
+    jailbreak_detections: AtomicU64,
 }
 
 impl AiGatewayAgent {
@@ -228,6 +243,11 @@ impl AiGatewayAgent {
             rate_limiter: RwLock::new(ratelimit::RateLimiter::new(rate_limit_config)),
             requests: Arc::new(Mutex::new(HashMap::new())),
             config: RwLock::new(config),
+            requests_total: AtomicU64::new(0),
+            requests_blocked: AtomicU64::new(0),
+            prompt_injection_detections: AtomicU64::new(0),
+            pii_detections: AtomicU64::new(0),
+            jailbreak_detections: AtomicU64::new(0),
         }
     }
 
@@ -516,6 +536,7 @@ impl AiGatewayAgent {
                 .detect_any(all_content.iter().copied())
             {
                 warn!("Prompt injection detected: {}", detection);
+                self.prompt_injection_detections.fetch_add(1, Ordering::Relaxed);
                 tags.push("detected:prompt-injection".to_string());
                 reason_codes.push("PROMPT_INJECTION".to_string());
                 if config.block_mode {
@@ -532,6 +553,7 @@ impl AiGatewayAgent {
                 .detect_any(all_content.iter().copied())
             {
                 warn!("Jailbreak attempt detected: {}", detection);
+                self.jailbreak_detections.fetch_add(1, Ordering::Relaxed);
                 tags.push("detected:jailbreak".to_string());
                 reason_codes.push("JAILBREAK_ATTEMPT".to_string());
                 if config.block_mode {
@@ -558,6 +580,7 @@ impl AiGatewayAgent {
                     .join(",");
 
                 warn!("PII detected: {}", pii_str);
+                self.pii_detections.fetch_add(1, Ordering::Relaxed);
                 response = response.add_request_header(HeaderOp::Set {
                     name: "X-AI-Gateway-PII-Detected".to_string(),
                     value: pii_str.clone(),
@@ -601,16 +624,33 @@ impl AiGatewayAgent {
 }
 
 #[async_trait]
-impl AgentHandler for AiGatewayAgent {
-    async fn on_configure(&self, event: ConfigureEvent) -> AgentResponse {
-        info!(agent_id = %event.agent_id, "Received configuration event");
+impl AgentHandlerV2 for AiGatewayAgent {
+    /// Get agent capabilities for v2 protocol handshake.
+    fn capabilities(&self) -> AgentCapabilities {
+        AgentCapabilities::new("ai-gateway", "AI Gateway Agent", env!("CARGO_PKG_VERSION"))
+            .with_event(EventType::RequestHeaders)
+            .with_event(EventType::RequestBodyChunk)
+            .with_features(AgentFeatures {
+                streaming_body: true,
+                config_push: true,
+                health_reporting: true,
+                metrics_export: true,
+                concurrent_requests: 100,
+                cancellation: true,
+                ..Default::default()
+            })
+    }
+
+    /// Handle configuration updates from the proxy.
+    async fn on_configure(&self, config: serde_json::Value, version: Option<String>) -> bool {
+        info!(version = ?version, "Received configuration update");
 
         // Parse the JSON config
-        let json_config: AiGatewayConfigJson = match serde_json::from_value(event.config) {
+        let json_config: AiGatewayConfigJson = match serde_json::from_value(config) {
             Ok(cfg) => cfg,
             Err(e) => {
                 warn!(error = %e, "Failed to parse configuration, using defaults");
-                AiGatewayConfigJson::default()
+                return false;
             }
         };
 
@@ -619,7 +659,70 @@ impl AgentHandler for AiGatewayAgent {
         self.reconfigure(new_config).await;
 
         debug!("Configuration applied successfully");
-        AgentResponse::default_allow()
+        true
+    }
+
+    /// Get current health status for v2 protocol.
+    fn health_status(&self) -> HealthStatus {
+        HealthStatus::healthy("ai-gateway")
+    }
+
+    /// Get current metrics report for v2 protocol.
+    fn metrics_report(&self) -> Option<MetricsReport> {
+        let mut report = MetricsReport::new("ai-gateway", 10_000);
+
+        report.counters.push(CounterMetric::new(
+            "ai_gateway_requests_total",
+            self.requests_total.load(Ordering::Relaxed),
+        ));
+        report.counters.push(CounterMetric::new(
+            "ai_gateway_requests_blocked_total",
+            self.requests_blocked.load(Ordering::Relaxed),
+        ));
+        report.counters.push(CounterMetric::new(
+            "ai_gateway_prompt_injection_detections_total",
+            self.prompt_injection_detections.load(Ordering::Relaxed),
+        ));
+        report.counters.push(CounterMetric::new(
+            "ai_gateway_pii_detections_total",
+            self.pii_detections.load(Ordering::Relaxed),
+        ));
+        report.counters.push(CounterMetric::new(
+            "ai_gateway_jailbreak_detections_total",
+            self.jailbreak_detections.load(Ordering::Relaxed),
+        ));
+
+        // Add gauge for in-flight requests
+        let in_flight = self.requests.try_lock().map(|r| r.len()).unwrap_or(0);
+        report.gauges.push(GaugeMetric::new(
+            "ai_gateway_in_flight_requests",
+            in_flight as f64,
+        ));
+
+        Some(report)
+    }
+
+    /// Handle shutdown request from proxy.
+    async fn on_shutdown(&self, reason: ShutdownReason, grace_period_ms: u64) {
+        info!(
+            reason = ?reason,
+            grace_period_ms = grace_period_ms,
+            "Received shutdown request"
+        );
+        // Clean up any pending requests
+        let mut requests = self.requests.lock().await;
+        requests.clear();
+    }
+
+    /// Handle drain request from proxy.
+    async fn on_drain(&self, duration_ms: u64, reason: DrainReason) {
+        info!(
+            duration_ms = duration_ms,
+            reason = ?reason,
+            "Received drain request"
+        );
+        // In drain mode, we continue processing existing requests but stop accepting new ones
+        // The proxy handles this by not sending new requests
     }
 
     async fn on_request_headers(&self, event: RequestHeadersEvent) -> AgentResponse {
@@ -675,10 +778,50 @@ impl AgentHandler for AiGatewayAgent {
             let state = requests.remove(&event.correlation_id).unwrap();
             // Drop the lock before async processing
             drop(requests);
-            return self.process_body(&state).await;
+
+            // Track metrics
+            self.requests_total.fetch_add(1, Ordering::Relaxed);
+
+            let response = self.process_body(&state).await;
+
+            // Track blocked requests
+            if matches!(response.decision, sentinel_agent_protocol::Decision::Block { .. }) {
+                self.requests_blocked.fetch_add(1, Ordering::Relaxed);
+            }
+
+            return response;
         }
 
         AgentResponse::default_allow()
+    }
+}
+
+/// v1 AgentHandler implementation for backward compatibility with UDS transport.
+///
+/// This implementation delegates to the v2 handler methods where possible.
+#[async_trait]
+impl AgentHandler for AiGatewayAgent {
+    async fn on_configure(&self, event: ConfigureEvent) -> AgentResponse {
+        info!(agent_id = %event.agent_id, "Received v1 configuration event");
+
+        // Delegate to v2 on_configure
+        let accepted = <Self as AgentHandlerV2>::on_configure(self, event.config, None).await;
+
+        if accepted {
+            AgentResponse::default_allow()
+        } else {
+            AgentResponse::block(500, Some("Configuration rejected".to_string()))
+        }
+    }
+
+    async fn on_request_headers(&self, event: RequestHeadersEvent) -> AgentResponse {
+        // Delegate to v2 implementation
+        <Self as AgentHandlerV2>::on_request_headers(self, event).await
+    }
+
+    async fn on_request_body_chunk(&self, event: RequestBodyChunkEvent) -> AgentResponse {
+        // Delegate to v2 implementation
+        <Self as AgentHandlerV2>::on_request_body_chunk(self, event).await
     }
 }
 

@@ -3,6 +3,7 @@
 use anyhow::Result;
 use clap::Parser;
 use sentinel_agent_ai_gateway::{AiGatewayAgent, AiGatewayConfig, PiiAction};
+use sentinel_agent_protocol::v2::GrpcAgentServerV2;
 use sentinel_agent_protocol::AgentServer;
 use tracing::info;
 use tracing_subscriber::{fmt, EnvFilter};
@@ -15,13 +16,18 @@ use tracing_subscriber::{fmt, EnvFilter};
 #[command(name = "sentinel-agent-ai-gateway")]
 #[command(version, about, long_about = None)]
 struct Args {
-    /// Unix socket path for agent communication
+    /// Unix socket path for agent communication (UDS transport)
     #[arg(
         long,
         env = "AGENT_SOCKET",
         default_value = "/tmp/sentinel-ai-gateway.sock"
     )]
     socket: String,
+
+    /// gRPC address for agent communication (e.g., 0.0.0.0:50051)
+    /// When specified, the agent will use gRPC transport instead of UDS
+    #[arg(long, env = "GRPC_ADDRESS")]
+    grpc_address: Option<String>,
 
     /// Enable prompt injection detection
     #[arg(long, env = "PROMPT_INJECTION", default_value = "true")]
@@ -155,9 +161,22 @@ async fn main() -> Result<()> {
     }
 
     let agent = AiGatewayAgent::new(config);
-    let server = AgentServer::new("ai-gateway", &args.socket, Box::new(agent));
 
-    server.run().await?;
+    // Choose transport based on CLI arguments
+    if let Some(grpc_addr) = args.grpc_address {
+        // Use gRPC transport (v2 protocol)
+        info!("Starting AI Gateway Agent with gRPC transport on {}", grpc_addr);
+        let addr: std::net::SocketAddr = grpc_addr
+            .parse()
+            .map_err(|e| anyhow::anyhow!("Invalid gRPC address '{}': {}", grpc_addr, e))?;
+        let server = GrpcAgentServerV2::new("ai-gateway", Box::new(agent));
+        server.run(addr).await?;
+    } else {
+        // Use UDS transport (v1 protocol for backward compatibility)
+        info!("Starting AI Gateway Agent with UDS transport on {}", args.socket);
+        let server = AgentServer::new("ai-gateway", &args.socket, Box::new(agent));
+        server.run().await?;
+    }
 
     Ok(())
 }
