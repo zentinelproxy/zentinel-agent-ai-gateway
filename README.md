@@ -1,6 +1,6 @@
 # Sentinel AI Gateway Agent
 
-An AI gateway agent for [Sentinel](https://sentinel.raskell.io) reverse proxy that provides comprehensive security and control for AI API requests (OpenAI, Anthropic, Azure OpenAI).
+An AI gateway agent for [Sentinel](https://sentinel.raskell.io) reverse proxy that provides pattern-based security controls for AI API requests (OpenAI, Anthropic, Azure OpenAI).
 
 ## Features
 
@@ -22,6 +22,7 @@ An AI gateway agent for [Sentinel](https://sentinel.raskell.io) reverse proxy th
   - Returns 429 with Retry-After header when exceeded
 - **Token Limits**: Enforce maximum tokens per request
 - **Cost Estimation**: Add headers with estimated cost based on model pricing
+  - Token estimation uses a ~4 chars/token approximation; for exact counts use Sentinel's built-in Tiktoken support
 - **Model Allowlist**: Restrict which AI models can be used
 
 ### Observability
@@ -88,22 +89,28 @@ All CLI options can be configured via environment variables:
 
 Configure Sentinel proxy to use this agent:
 
-```yaml
-agents:
-  - name: ai-gateway
-    type: socket
-    socket_path: /tmp/sentinel-ai-gateway.sock
-    timeout: 5s
-    events:
-      - request_headers
-      - request_body_chunk
+```kdl
+agents {
+    agent "ai-gateway" {
+        type "custom"
+        transport "unix_socket" {
+            path "/tmp/sentinel-ai-gateway.sock"
+        }
+        events ["request_headers" "request_body_chunk"]
+        timeout-ms 5000
+        failure-mode "open"
+    }
+}
 
-routes:
-  - match:
-      hosts: ["api.openai.com", "api.anthropic.com"]
-    agents:
-      - ai-gateway
-    upstream: ai-backend
+routes {
+    route "ai" {
+        matches {
+            hosts ["api.openai.com" "api.anthropic.com"]
+        }
+        upstream "ai-backend"
+        agents ["ai-gateway"]
+    }
+}
 ```
 
 ## Headers Added
