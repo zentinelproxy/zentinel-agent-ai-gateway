@@ -1,6 +1,6 @@
-# Sentinel AI Gateway Agent
+# Zentinel AI Gateway Agent
 
-An AI gateway agent for [Sentinel](https://sentinel.raskell.io) reverse proxy that provides pattern-based security controls for AI API requests (OpenAI, Anthropic, Azure OpenAI).
+An AI gateway agent for [Zentinel](https://zentinelproxy.io) reverse proxy that provides pattern-based security controls for AI API requests (OpenAI, Anthropic, Azure OpenAI).
 
 ## Features
 
@@ -22,7 +22,7 @@ An AI gateway agent for [Sentinel](https://sentinel.raskell.io) reverse proxy th
   - Returns 429 with Retry-After header when exceeded
 - **Token Limits**: Enforce maximum tokens per request
 - **Cost Estimation**: Add headers with estimated cost based on model pricing
-  - Token estimation uses a ~4 chars/token approximation; for exact counts use Sentinel's built-in Tiktoken support
+  - Token estimation uses a ~4 chars/token approximation; for exact counts use Zentinel's built-in Tiktoken support
 - **Model Allowlist**: Restrict which AI models can be used
 
 ### Observability
@@ -34,14 +34,14 @@ An AI gateway agent for [Sentinel](https://sentinel.raskell.io) reverse proxy th
 ## Installation
 
 ```bash
-cargo install sentinel-agent-ai-gateway
+cargo install zentinel-agent-ai-gateway
 ```
 
 Or build from source:
 
 ```bash
-git clone https://github.com/raskell-io/sentinel-agent-ai-gateway
-cd sentinel-agent-ai-gateway
+git clone https://github.com/zentinelproxy/zentinel-agent-ai-gateway
+cd zentinel-agent-ai-gateway
 cargo build --release
 ```
 
@@ -50,14 +50,14 @@ cargo build --release
 ### Basic Usage
 
 ```bash
-sentinel-ai-gateway-agent --socket /tmp/sentinel-ai.sock
+zentinel-ai-gateway-agent --socket /tmp/zentinel-ai.sock
 ```
 
 ### With Options
 
 ```bash
-sentinel-ai-gateway-agent \
-  --socket /tmp/sentinel-ai.sock \
+zentinel-ai-gateway-agent \
+  --socket /tmp/zentinel-ai.sock \
   --allowed-models "gpt-4,gpt-3.5-turbo,claude-3" \
   --max-tokens 4000 \
   --pii-action block \
@@ -70,7 +70,7 @@ All CLI options can be configured via environment variables:
 
 | Option | Env Var | Description | Default |
 |--------|---------|-------------|---------|
-| `--socket` | `AGENT_SOCKET` | Unix socket path | `/tmp/sentinel-ai-gateway.sock` |
+| `--socket` | `AGENT_SOCKET` | Unix socket path | `/tmp/zentinel-ai-gateway.sock` |
 | `--prompt-injection` | `PROMPT_INJECTION` | Enable prompt injection detection | `true` |
 | `--pii-detection` | `PII_DETECTION` | Enable PII detection | `true` |
 | `--pii-action` | `PII_ACTION` | Action on PII: block/redact/log | `log` |
@@ -85,16 +85,16 @@ All CLI options can be configured via environment variables:
 | `--rate-limit-tokens` | `RATE_LIMIT_TOKENS` | Tokens per minute per client | `0` (unlimited) |
 | `--verbose` | `VERBOSE` | Enable debug logging | `false` |
 
-## Sentinel Configuration
+## Zentinel Configuration
 
-Configure Sentinel proxy to use this agent:
+Configure Zentinel proxy to use this agent:
 
 ```kdl
 agents {
     agent "ai-gateway" {
         type "custom"
         transport "unix_socket" {
-            path "/tmp/sentinel-ai-gateway.sock"
+            path "/tmp/zentinel-ai-gateway.sock"
         }
         events ["request_headers" "request_body_chunk"]
         timeout-ms 5000
@@ -194,8 +194,8 @@ Validates requests against JSON schemas for:
 ### As a Library
 
 ```rust
-use sentinel_agent_ai_gateway::{AiGatewayAgent, AiGatewayConfig, PiiAction};
-use sentinel_agent_protocol::AgentServer;
+use zentinel_agent_ai_gateway::{AiGatewayAgent, AiGatewayConfig, PiiAction};
+use zentinel_agent_protocol::AgentServer;
 
 let config = AiGatewayConfig {
     prompt_injection_enabled: true,
@@ -229,10 +229,10 @@ cargo test -- --nocapture
 
 ## Related Agents
 
-- [sentinel-agent-waf](https://github.com/raskell-io/sentinel-agent-waf) - Web Application Firewall
-- [sentinel-agent-modsec](https://github.com/raskell-io/sentinel-agent-modsec) - ModSecurity with OWASP CRS
-- [sentinel-agent-js](https://github.com/raskell-io/sentinel-agent-js) - JavaScript scripting
-- [sentinel-agent-wasm](https://github.com/raskell-io/sentinel-agent-wasm) - WebAssembly plugins
+- [zentinel-agent-waf](https://github.com/zentinelproxy/zentinel-agent-waf) - Web Application Firewall
+- [zentinel-agent-modsec](https://github.com/zentinelproxy/zentinel-agent-modsec) - ModSecurity with OWASP CRS
+- [zentinel-agent-js](https://github.com/zentinelproxy/zentinel-agent-js) - JavaScript scripting
+- [zentinel-agent-wasm](https://github.com/zentinelproxy/zentinel-agent-wasm) - WebAssembly plugins
 
 ## License
 

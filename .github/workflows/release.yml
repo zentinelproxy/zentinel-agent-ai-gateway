@@ -12,7 +12,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/sentinel-ai-gateway
+  IMAGE_NAME: ${{ github.repository_owner }}/zentinel-ai-gateway
 
 jobs:
   publish:
@@ -48,17 +48,17 @@ jobs:
       - name: Build release binary
         run: |
           cargo build --release
-          strip target/release/sentinel-ai-gateway-agent
+          strip target/release/zentinel-ai-gateway-agent
 
       - name: Prepare artifacts
         run: |
           mkdir -p artifacts
-          cp target/release/sentinel-ai-gateway-agent artifacts/
+          cp target/release/zentinel-ai-gateway-agent artifacts/
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: sentinel-ai-gateway-linux-amd64
+          name: zentinel-ai-gateway-linux-amd64
           path: artifacts/
           retention-days: 7
 
@@ -76,11 +76,11 @@ jobs:
       - name: Download AMD64 artifact
         uses: actions/download-artifact@v4
         with:
-          name: sentinel-ai-gateway-linux-amd64
+          name: zentinel-ai-gateway-linux-amd64
           path: artifacts/linux-amd64
 
       - name: Prepare artifact
-        run: chmod +x artifacts/linux-amd64/sentinel-ai-gateway-agent
+        run: chmod +x artifacts/linux-amd64/zentinel-ai-gateway-agent
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -122,13 +122,13 @@ jobs:
       - name: Download AMD64 artifact
         uses: actions/download-artifact@v4
         with:
-          name: sentinel-ai-gateway-linux-amd64
+          name: zentinel-ai-gateway-linux-amd64
           path: artifacts/linux-amd64
 
       - name: Prepare release files
         run: |
           mkdir -p release
-          mv artifacts/linux-amd64/sentinel-ai-gateway-agent release/sentinel-ai-gateway-agent-linux-amd64
+          mv artifacts/linux-amd64/zentinel-ai-gateway-agent release/zentinel-ai-gateway-agent-linux-amd64
 
       - name: Create release
         uses: softprops/action-gh-release@v1

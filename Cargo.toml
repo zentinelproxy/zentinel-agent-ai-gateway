@@ -1,30 +1,30 @@
 [package]
-name = "sentinel-agent-ai-gateway"
+name = "zentinel-agent-ai-gateway"
 version = "0.2.0"
 edition = "2021"
 rust-version = "1.75"
-authors = ["Sentinel Contributors"]
+authors = ["Zentinel Contributors"]
 license = "Apache-2.0"
-repository = "https://github.com/raskell-io/sentinel-agent-ai-gateway"
-homepage = "https://sentinel.raskell.io"
-documentation = "https://sentinel.raskell.io/docs/agents/ai-gateway"
-description = "AI Gateway agent for Sentinel reverse proxy - prompt filtering, PII detection, usage control"
-keywords = ["sentinel", "proxy", "agent", "ai", "llm"]
+repository = "https://github.com/zentinelproxy/zentinel-agent-ai-gateway"
+homepage = "https://zentinelproxy.io"
+documentation = "https://zentinelproxy.io/docs/agents/ai-gateway"
+description = "AI Gateway agent for Zentinel reverse proxy - prompt filtering, PII detection, usage control"
+keywords = ["zentinel", "proxy", "agent", "ai", "llm"]
 categories = ["network-programming", "web-programming"]
 readme = "README.md"
 
 [lib]
-name = "sentinel_agent_ai_gateway"
+name = "zentinel_agent_ai_gateway"
 path = "src/lib.rs"
 
 [[bin]]
-name = "sentinel-ai-gateway-agent"
+name = "zentinel-ai-gateway-agent"
 path = "src/main.rs"
 
 [dependencies]
-# Sentinel protocol
-sentinel-agent-protocol = "0.3"
-sentinel-common = "0.3"
+# Zentinel protocol
+zentinel-agent-protocol = "0.3"
+zentinel-common = "0.3"
 
 # Async runtime
 tokio = { version = "1.40", features = ["full"] }

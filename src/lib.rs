@@ -1,4 +1,4 @@
-//! AI Gateway Agent for Sentinel proxy.
+//! AI Gateway Agent for Zentinel proxy.
 //!
 //! Provides comprehensive control over AI API requests including:
 //! - Prompt injection detection
@@ -16,11 +16,11 @@ use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use detection::{JailbreakDetector, PiiDetector, PiiType, PromptInjectionDetector};
 use providers::{AiProvider, AiRequest};
-use sentinel_agent_protocol::v2::{
+use zentinel_agent_protocol::v2::{
     AgentCapabilities, AgentFeatures, AgentHandlerV2, CounterMetric, DrainReason, GaugeMetric,
     HealthStatus, MetricsReport, ShutdownReason,
 };
-use sentinel_agent_protocol::{
+use zentinel_agent_protocol::{
     AgentHandler, AgentResponse, AuditMetadata, ConfigureEvent, EventType, HeaderOp,
     RequestBodyChunkEvent, RequestHeadersEvent,
 };
@@ -785,7 +785,7 @@ impl AgentHandlerV2 for AiGatewayAgent {
             let response = self.process_body(&state).await;
 
             // Track blocked requests
-            if matches!(response.decision, sentinel_agent_protocol::Decision::Block { .. }) {
+            if matches!(response.decision, zentinel_agent_protocol::Decision::Block { .. }) {
                 self.requests_blocked.fetch_add(1, Ordering::Relaxed);
             }
 

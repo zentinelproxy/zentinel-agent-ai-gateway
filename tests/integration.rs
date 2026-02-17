@@ -1,8 +1,8 @@
 //! Integration tests for AI Gateway Agent.
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use sentinel_agent_ai_gateway::{AiGatewayAgent, AiGatewayConfig, PiiAction};
-use sentinel_agent_protocol::{
+use zentinel_agent_ai_gateway::{AiGatewayAgent, AiGatewayConfig, PiiAction};
+use zentinel_agent_protocol::{
     AgentClient, AgentServer, Decision, EventType, RequestBodyChunkEvent, RequestHeadersEvent,
     RequestMetadata,
 };
@@ -90,7 +90,7 @@ async fn send_request(
     uri: &str,
     body: &str,
     headers: HashMap<String, Vec<String>>,
-) -> sentinel_agent_protocol::AgentResponse {
+) -> zentinel_agent_protocol::AgentResponse {
     // Send headers
     let headers_event = RequestHeadersEvent {
         metadata: test_metadata(correlation_id),
@@ -403,7 +403,7 @@ async fn test_pii_email_detected_log_mode() {
         .contains(&"PII_DETECTED".to_string()));
     // Check header was added
     assert!(response.request_headers.iter().any(
-        |h| matches!(h, sentinel_agent_protocol::HeaderOp::Set { name, value }
+        |h| matches!(h, zentinel_agent_protocol::HeaderOp::Set { name, value }
             if name == "X-AI-Gateway-PII-Detected" && value.contains("email"))
     ));
     client.close().await.unwrap();
@@ -663,13 +663,13 @@ async fn test_provider_and_model_headers_added() {
 
     // Check provider header
     assert!(response.request_headers.iter().any(
-        |h| matches!(h, sentinel_agent_protocol::HeaderOp::Set { name, value }
+        |h| matches!(h, zentinel_agent_protocol::HeaderOp::Set { name, value }
             if name == "X-AI-Gateway-Provider" && value == "openai")
     ));
 
     // Check model header
     assert!(response.request_headers.iter().any(
-        |h| matches!(h, sentinel_agent_protocol::HeaderOp::Set { name, value }
+        |h| matches!(h, zentinel_agent_protocol::HeaderOp::Set { name, value }
             if name == "X-AI-Gateway-Model" && value == "gpt-4")
     ));
 
@@ -695,7 +695,7 @@ async fn test_token_estimation_header_added() {
 
     // Check token estimation header exists
     assert!(response.request_headers.iter().any(
-        |h| matches!(h, sentinel_agent_protocol::HeaderOp::Set { name, .. }
+        |h| matches!(h, zentinel_agent_protocol::HeaderOp::Set { name, .. }
             if name == "X-AI-Gateway-Tokens-Estimated")
     ));
 
@@ -724,7 +724,7 @@ async fn test_cost_estimation_header_added() {
 
     // Check cost estimation header exists
     assert!(response.request_headers.iter().any(
-        |h| matches!(h, sentinel_agent_protocol::HeaderOp::Set { name, .. }
+        |h| matches!(h, zentinel_agent_protocol::HeaderOp::Set { name, .. }
             if name == "X-AI-Gateway-Cost-Estimated")
     ));
 
@@ -754,7 +754,7 @@ async fn test_anthropic_provider_detected() {
 
     // Check provider header
     assert!(response.request_headers.iter().any(
-        |h| matches!(h, sentinel_agent_protocol::HeaderOp::Set { name, value }
+        |h| matches!(h, zentinel_agent_protocol::HeaderOp::Set { name, value }
             if name == "X-AI-Gateway-Provider" && value == "anthropic")
     ));
 
@@ -780,7 +780,7 @@ async fn test_azure_provider_detected() {
 
     // Check provider header
     assert!(response.request_headers.iter().any(
-        |h| matches!(h, sentinel_agent_protocol::HeaderOp::Set { name, value }
+        |h| matches!(h, zentinel_agent_protocol::HeaderOp::Set { name, value }
             if name == "X-AI-Gateway-Provider" && value == "azure")
     ));
 
@@ -934,7 +934,7 @@ async fn test_schema_validation_valid_openai_request() {
     let schema_valid = response
         .request_headers
         .iter()
-        .find(|op| matches!(op, sentinel_agent_protocol::HeaderOp::Set { name, .. } if name == "X-AI-Gateway-Schema-Valid"));
+        .find(|op| matches!(op, zentinel_agent_protocol::HeaderOp::Set { name, .. } if name == "X-AI-Gateway-Schema-Valid"));
     assert!(schema_valid.is_some());
     client.close().await.unwrap();
     handle.abort();
@@ -1229,7 +1229,7 @@ async fn test_rate_limit_requests_allowed() {
     let has_limit_header = response
         .response_headers
         .iter()
-        .any(|op| matches!(op, sentinel_agent_protocol::HeaderOp::Set { name, .. } if name == "X-RateLimit-Limit-Requests"));
+        .any(|op| matches!(op, zentinel_agent_protocol::HeaderOp::Set { name, .. } if name == "X-RateLimit-Limit-Requests"));
     assert!(has_limit_header);
 
     client.close().await.unwrap();
@@ -1285,7 +1285,7 @@ async fn test_rate_limit_requests_exceeded() {
     let has_retry_header = response
         .response_headers
         .iter()
-        .any(|op| matches!(op, sentinel_agent_protocol::HeaderOp::Set { name, .. } if name == "Retry-After"));
+        .any(|op| matches!(op, zentinel_agent_protocol::HeaderOp::Set { name, .. } if name == "Retry-After"));
     assert!(has_retry_header);
 
     client.close().await.unwrap();
@@ -1357,7 +1357,7 @@ async fn test_rate_limit_disabled() {
     let has_limit_header = response
         .response_headers
         .iter()
-        .any(|op| matches!(op, sentinel_agent_protocol::HeaderOp::Set { name, .. } if name == "X-RateLimit-Limit-Requests"));
+        .any(|op| matches!(op, zentinel_agent_protocol::HeaderOp::Set { name, .. } if name == "X-RateLimit-Limit-Requests"));
     assert!(!has_limit_header);
 
     client.close().await.unwrap();

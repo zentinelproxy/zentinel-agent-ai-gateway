@@ -1,26 +1,26 @@
-//! AI Gateway Agent CLI for Sentinel proxy.
+//! AI Gateway Agent CLI for Zentinel proxy.
 
 use anyhow::Result;
 use clap::Parser;
-use sentinel_agent_ai_gateway::{AiGatewayAgent, AiGatewayConfig, PiiAction};
-use sentinel_agent_protocol::v2::GrpcAgentServerV2;
-use sentinel_agent_protocol::AgentServer;
+use zentinel_agent_ai_gateway::{AiGatewayAgent, AiGatewayConfig, PiiAction};
+use zentinel_agent_protocol::v2::GrpcAgentServerV2;
+use zentinel_agent_protocol::AgentServer;
 use tracing::info;
 use tracing_subscriber::{fmt, EnvFilter};
 
-/// AI Gateway Agent for Sentinel proxy
+/// AI Gateway Agent for Zentinel proxy
 ///
 /// Provides security controls for AI API requests including prompt injection
 /// detection, PII filtering, jailbreak detection, and usage controls.
 #[derive(Parser, Debug)]
-#[command(name = "sentinel-agent-ai-gateway")]
+#[command(name = "zentinel-agent-ai-gateway")]
 #[command(version, about, long_about = None)]
 struct Args {
     /// Unix socket path for agent communication (UDS transport)
     #[arg(
         long,
         env = "AGENT_SOCKET",
-        default_value = "/tmp/sentinel-ai-gateway.sock"
+        default_value = "/tmp/zentinel-ai-gateway.sock"
     )]
     socket: String,
 
