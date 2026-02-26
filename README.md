@@ -33,11 +33,25 @@ An AI gateway agent for [Zentinel](https://zentinelproxy.io) reverse proxy that 
 
 ## Installation
 
+### Using Bundle (Recommended)
+
+```bash
+# Install just this agent
+zentinel bundle install ai-gateway
+
+# Or install all bundled agents
+zentinel bundle install
+```
+
+The bundle command downloads the correct binary for your platform and places it in the standard location. See the [bundle documentation](https://zentinelproxy.io/docs/deployment/bundle/) for details.
+
+### Using Cargo
+
 ```bash
 cargo install zentinel-agent-ai-gateway
 ```
 
-Or build from source:
+### From Source
 
 ```bash
 git clone https://github.com/zentinelproxy/zentinel-agent-ai-gateway
@@ -96,7 +110,7 @@ agents {
         transport "unix_socket" {
             path "/tmp/zentinel-ai-gateway.sock"
         }
-        events ["request_headers" "request_body_chunk"]
+        events "request_headers" "request_body_chunk"
         timeout-ms 5000
         failure-mode "open"
     }
@@ -105,10 +119,10 @@ agents {
 routes {
     route "ai" {
         matches {
-            hosts ["api.openai.com" "api.anthropic.com"]
+            hosts "api.openai.com" "api.anthropic.com"
         }
         upstream "ai-backend"
-        agents ["ai-gateway"]
+        agents "ai-gateway"
     }
 }
 ```

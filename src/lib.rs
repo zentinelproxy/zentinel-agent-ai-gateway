@@ -21,8 +21,8 @@ use zentinel_agent_protocol::v2::{
     HealthStatus, MetricsReport, ShutdownReason,
 };
 use zentinel_agent_protocol::{
-    AgentHandler, AgentResponse, AuditMetadata, ConfigureEvent, EventType, HeaderOp,
-    RequestBodyChunkEvent, RequestHeadersEvent,
+    AgentResponse, AuditMetadata, EventType, HeaderOp, RequestBodyChunkEvent,
+    RequestHeadersEvent,
 };
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -793,35 +793,6 @@ impl AgentHandlerV2 for AiGatewayAgent {
         }
 
         AgentResponse::default_allow()
-    }
-}
-
-/// v1 AgentHandler implementation for backward compatibility with UDS transport.
-///
-/// This implementation delegates to the v2 handler methods where possible.
-#[async_trait]
-impl AgentHandler for AiGatewayAgent {
-    async fn on_configure(&self, event: ConfigureEvent) -> AgentResponse {
-        info!(agent_id = %event.agent_id, "Received v1 configuration event");
-
-        // Delegate to v2 on_configure
-        let accepted = <Self as AgentHandlerV2>::on_configure(self, event.config, None).await;
-
-        if accepted {
-            AgentResponse::default_allow()
-        } else {
-            AgentResponse::block(500, Some("Configuration rejected".to_string()))
-        }
-    }
-
-    async fn on_request_headers(&self, event: RequestHeadersEvent) -> AgentResponse {
-        // Delegate to v2 implementation
-        <Self as AgentHandlerV2>::on_request_headers(self, event).await
-    }
-
-    async fn on_request_body_chunk(&self, event: RequestBodyChunkEvent) -> AgentResponse {
-        // Delegate to v2 implementation
-        <Self as AgentHandlerV2>::on_request_body_chunk(self, event).await
     }
 }
 

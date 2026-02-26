@@ -3,8 +3,7 @@
 use anyhow::Result;
 use clap::Parser;
 use zentinel_agent_ai_gateway::{AiGatewayAgent, AiGatewayConfig, PiiAction};
-use zentinel_agent_protocol::v2::GrpcAgentServerV2;
-use zentinel_agent_protocol::AgentServer;
+use zentinel_agent_protocol::v2::{GrpcAgentServerV2, UdsAgentServerV2};
 use tracing::info;
 use tracing_subscriber::{fmt, EnvFilter};
 
@@ -172,9 +171,9 @@ async fn main() -> Result<()> {
         let server = GrpcAgentServerV2::new("ai-gateway", Box::new(agent));
         server.run(addr).await?;
     } else {
-        // Use UDS transport (v1 protocol for backward compatibility)
+        // Use UDS transport (v2 protocol)
         info!("Starting AI Gateway Agent with UDS transport on {}", args.socket);
-        let server = AgentServer::new("ai-gateway", &args.socket, Box::new(agent));
+        let server = UdsAgentServerV2::new("ai-gateway", &args.socket, Box::new(agent));
         server.run().await?;
     }
 
