@@ -3,8 +3,9 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use zentinel_agent_ai_gateway::{AiGatewayAgent, AiGatewayConfig, PiiAction};
 use zentinel_agent_protocol::{
-    AgentClient, AgentServer, Decision, EventType, RequestBodyChunkEvent, RequestHeadersEvent,
+    Decision, RequestBodyChunkEvent, RequestHeadersEvent,
     RequestMetadata,
+    v2::{AgentClientV2Uds, UdsAgentServerV2},
 };
 use std::collections::HashMap;
 use std::time::Duration;
@@ -62,12 +63,12 @@ fn anthropic_request(model: &str, messages: &[(&str, &str)], system: Option<&str
 }
 
 /// Start the agent server and return a connected client
-async fn start_agent(config: AiGatewayConfig) -> (AgentClient, tokio::task::JoinHandle<()>) {
+async fn start_agent(config: AiGatewayConfig) -> (AgentClientV2Uds, tokio::task::JoinHandle<()>) {
     let dir = tempdir().unwrap();
     let socket_path = dir.path().join("test.sock");
 
     let agent = AiGatewayAgent::new(config);
-    let server = AgentServer::new("test-ai-gateway", socket_path.clone(), Box::new(agent));
+    let server = UdsAgentServerV2::new("test-ai-gateway", socket_path.clone(), Box::new(agent));
 
     let handle = tokio::spawn(async move {
         let _ = server.run().await;
@@ -76,7 +77,10 @@ async fn start_agent(config: AiGatewayConfig) -> (AgentClient, tokio::task::Join
     // Wait for server to start
     tokio::time::sleep(Duration::from_millis(100)).await;
 
-    let client = AgentClient::unix_socket("test-client", &socket_path, Duration::from_secs(5))
+    let client = AgentClientV2Uds::new("test-client", socket_path.to_string_lossy().to_string(), Duration::from_secs(5))
+        .await
+        .unwrap()
+        .connect()
         .await
         .unwrap();
 
@@ -85,7 +89,7 @@ async fn start_agent(config: AiGatewayConfig) -> (AgentClient, tokio::task::Join
 
 /// Send headers and body, return the final response
 async fn send_request(
-    client: &mut AgentClient,
+    client: &mut AgentClientV2Uds,
     correlation_id: &str,
     uri: &str,
     body: &str,
@@ -100,7 +104,7 @@ async fn send_request(
     };
 
     let _headers_response = client
-        .send_event(EventType::RequestHeaders, &headers_event)
+        .send_request_headers(correlation_id, &headers_event)
         .await
         .unwrap();
 
@@ -115,7 +119,7 @@ async fn send_request(
     };
 
     client
-        .send_event(EventType::RequestBodyChunk, &body_event)
+        .send_request_body_chunk(correlation_id, &body_event)
         .await
         .unwrap()
 }
