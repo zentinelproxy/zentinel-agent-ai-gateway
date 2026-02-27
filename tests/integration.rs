@@ -1,15 +1,14 @@
 //! Integration tests for AI Gateway Agent.
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use zentinel_agent_ai_gateway::{AiGatewayAgent, AiGatewayConfig, PiiAction};
-use zentinel_agent_protocol::{
-    Decision, RequestBodyChunkEvent, RequestHeadersEvent,
-    RequestMetadata,
-    v2::{AgentClientV2Uds, UdsAgentServerV2},
-};
 use std::collections::HashMap;
 use std::time::Duration;
 use tempfile::tempdir;
+use zentinel_agent_ai_gateway::{AiGatewayAgent, AiGatewayConfig, PiiAction};
+use zentinel_agent_protocol::{
+    v2::{AgentClientV2Uds, UdsAgentServerV2},
+    Decision, RequestBodyChunkEvent, RequestHeadersEvent, RequestMetadata,
+};
 
 /// Helper to create test metadata
 fn test_metadata(correlation_id: &str) -> RequestMetadata {
@@ -77,12 +76,14 @@ async fn start_agent(config: AiGatewayConfig) -> (AgentClientV2Uds, tokio::task:
     // Wait for server to start
     tokio::time::sleep(Duration::from_millis(100)).await;
 
-    let client = AgentClientV2Uds::new("test-client", socket_path.to_string_lossy().to_string(), Duration::from_secs(5))
-        .await
-        .unwrap()
-        .connect()
-        .await
-        .unwrap();
+    let client = AgentClientV2Uds::new(
+        "test-client",
+        socket_path.to_string_lossy().to_string(),
+        Duration::from_secs(5),
+    )
+    .await
+    .unwrap();
+    client.connect().await.unwrap();
 
     (client, handle)
 }

@@ -16,20 +16,19 @@ use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use detection::{JailbreakDetector, PiiDetector, PiiType, PromptInjectionDetector};
 use providers::{AiProvider, AiRequest};
-use zentinel_agent_protocol::v2::{
-    AgentCapabilities, AgentFeatures, AgentHandlerV2, CounterMetric, DrainReason, GaugeMetric,
-    HealthStatus, MetricsReport, ShutdownReason,
-};
-use zentinel_agent_protocol::{
-    AgentResponse, AuditMetadata, EventType, HeaderOp, RequestBodyChunkEvent,
-    RequestHeadersEvent,
-};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, info, warn};
+use zentinel_agent_protocol::v2::{
+    AgentCapabilities, AgentFeatures, AgentHandlerV2, CounterMetric, DrainReason, GaugeMetric,
+    HealthStatus, MetricsReport, ShutdownReason,
+};
+use zentinel_agent_protocol::{
+    AgentResponse, AuditMetadata, EventType, HeaderOp, RequestBodyChunkEvent, RequestHeadersEvent,
+};
 
 /// Action to take when PII is detected
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -351,8 +350,14 @@ impl AiGatewayAgent {
         };
 
         // Build response with checks
-        self.check_request(&config, &ai_request, &state.provider, &body_str, &state.client_ip)
-            .await
+        self.check_request(
+            &config,
+            &ai_request,
+            &state.provider,
+            &body_str,
+            &state.client_ip,
+        )
+        .await
     }
 
     /// Run all security checks on the parsed AI request
@@ -536,7 +541,8 @@ impl AiGatewayAgent {
                 .detect_any(all_content.iter().copied())
             {
                 warn!("Prompt injection detected: {}", detection);
-                self.prompt_injection_detections.fetch_add(1, Ordering::Relaxed);
+                self.prompt_injection_detections
+                    .fetch_add(1, Ordering::Relaxed);
                 tags.push("detected:prompt-injection".to_string());
                 reason_codes.push("PROMPT_INJECTION".to_string());
                 if config.block_mode {
@@ -785,7 +791,10 @@ impl AgentHandlerV2 for AiGatewayAgent {
             let response = self.process_body(&state).await;
 
             // Track blocked requests
-            if matches!(response.decision, zentinel_agent_protocol::Decision::Block { .. }) {
+            if matches!(
+                response.decision,
+                zentinel_agent_protocol::Decision::Block { .. }
+            ) {
                 self.requests_blocked.fetch_add(1, Ordering::Relaxed);
             }
 

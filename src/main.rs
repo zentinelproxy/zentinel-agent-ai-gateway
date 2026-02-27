@@ -2,10 +2,10 @@
 
 use anyhow::Result;
 use clap::Parser;
-use zentinel_agent_ai_gateway::{AiGatewayAgent, AiGatewayConfig, PiiAction};
-use zentinel_agent_protocol::v2::{GrpcAgentServerV2, UdsAgentServerV2};
 use tracing::info;
 use tracing_subscriber::{fmt, EnvFilter};
+use zentinel_agent_ai_gateway::{AiGatewayAgent, AiGatewayConfig, PiiAction};
+use zentinel_agent_protocol::v2::{GrpcAgentServerV2, UdsAgentServerV2};
 
 /// AI Gateway Agent for Zentinel proxy
 ///
@@ -164,7 +164,10 @@ async fn main() -> Result<()> {
     // Choose transport based on CLI arguments
     if let Some(grpc_addr) = args.grpc_address {
         // Use gRPC transport (v2 protocol)
-        info!("Starting AI Gateway Agent with gRPC transport on {}", grpc_addr);
+        info!(
+            "Starting AI Gateway Agent with gRPC transport on {}",
+            grpc_addr
+        );
         let addr: std::net::SocketAddr = grpc_addr
             .parse()
             .map_err(|e| anyhow::anyhow!("Invalid gRPC address '{}': {}", grpc_addr, e))?;
@@ -172,7 +175,10 @@ async fn main() -> Result<()> {
         server.run(addr).await?;
     } else {
         // Use UDS transport (v2 protocol)
-        info!("Starting AI Gateway Agent with UDS transport on {}", args.socket);
+        info!(
+            "Starting AI Gateway Agent with UDS transport on {}",
+            args.socket
+        );
         let server = UdsAgentServerV2::new("ai-gateway", &args.socket, Box::new(agent));
         server.run().await?;
     }
