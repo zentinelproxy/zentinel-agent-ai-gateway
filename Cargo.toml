@@ -2,7 +2,7 @@
 name = "zentinel-agent-ai-gateway"
 version = "0.2.0"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.85"
 authors = ["Zentinel Contributors"]
 license = "Apache-2.0"
 repository = "https://github.com/zentinelproxy/zentinel-agent-ai-gateway"
@@ -31,7 +31,7 @@ tokio = { version = "1.40", features = ["full"] }
 async-trait = "0.1"
 
 # gRPC
-tonic = "0.12"
+tonic = "0.14"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
