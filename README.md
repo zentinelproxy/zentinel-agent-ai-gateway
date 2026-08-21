@@ -43,13 +43,18 @@ zentinel bundle install ai-gateway
 zentinel bundle install
 ```
 
-The bundle command downloads the correct binary for your platform and places it in the standard location. See the [bundle documentation](https://zentinelproxy.io/docs/deployment/bundle/) for details.
+The bundle command downloads the correct binary for your platform and places it in the standard location. See the [bundle documentation](https://docs.zentinelproxy.io/deployment/bundle/) for details.
 
 ### Using Cargo
 
+`zentinel-agent-ai-gateway` is not published on crates.io, so `cargo install zentinel-agent-ai-gateway` does not
+work. Install straight from the repository instead:
+
 ```bash
-cargo install zentinel-agent-ai-gateway
+cargo install --git https://github.com/zentinelproxy/zentinel-agent-ai-gateway
 ```
+
+This builds and installs the `zentinel-ai-gateway-agent` binary.
 
 ### From Source
 
