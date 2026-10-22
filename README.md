@@ -96,7 +96,10 @@ with `request_headers` alone it allows everything.
 ## Install
 
 Not in the Zentinel bundle yet: `zentinel bundle install ai-gateway` fails
-because the repository has no releases.
+because the repository has no releases. The release workflow now builds
+`zentinel-ai-gateway-agent-<version>-<platform>.tar.gz` for `linux-x86_64`,
+`linux-aarch64` and `darwin-aarch64` (the names the bundle downloads), so the
+first tag (`v0.3.0`) makes it bundleable.
 
 ### From source (recommended)
 
@@ -233,9 +236,16 @@ Headers the agent returns:
 | `X-RateLimit-Limit-Requests`, `X-RateLimit-Remaining-Requests`, `X-RateLimit-Limit-Tokens`, `X-RateLimit-Remaining-Tokens`, `X-RateLimit-Reset` | Response headers, when a rate limit is set |
 | `X-AI-Gateway-Blocked`, `X-AI-Gateway-Blocked-Reason`, `X-AI-Gateway-Schema-Errors`, `Retry-After` | On a block |
 
-Because these are returned with the request-body decision, Zentinel 0.6.50
-does not apply them to an allowed request (it only acts on a block at that
-point). The block itself, its status code and the audit tags work.
+Every decision is made in the request-body phase, so what the agent can do
+depends on the proxy:
+
+- Zentinel 26.10_7 (0.6.50) sends request bodies to agents only when the
+  config has a `waf` block, and rejects a `waf` block whose mode is not `off`.
+  In practice the agent sees headers only and blocks nothing.
+- Zentinel `main` (after zentinelproxy/zentinel#609) sends the body and acts
+  on a block (status code, audit tags), but has already opened the upstream
+  request, so the upstream receives the request headers of a blocked request.
+  The headers above are not applied to an allowed request.
 
 The agent reports counters (`ai_gateway_requests_total`,
 `ai_gateway_requests_blocked_total`, `ai_gateway_prompt_injection_detections_total`,
@@ -271,6 +281,19 @@ cargo fmt --all --check
 
 Minimum toolchain: Rust 1.94.1 (`rust-version` in `Cargo.toml`). Building needs
 `protoc` (CI installs `protobuf-compiler`).
+
+`scripts/smoke-test.sh` runs the release binary behind a real Zentinel with
+the shared harness (`agent-smoke/smoke.py` from
+[zentinelproxy/.github](https://github.com/zentinelproxy/.github)): the
+handshake, an ordinary request and a benign chat completion are forwarded,
+and stopping the agent changes the answer. CI runs it on every push; a
+release runs it on every platform before anything is published. The
+prompt-injection case runs only with `SMOKE_BODY_CASES=1`: no Zentinel
+release passes it yet (see above).
+
+```bash
+AGENT_SMOKE=../.github/agent-smoke/smoke.py scripts/smoke-test.sh target/release/zentinel-ai-gateway-agent ./zentinel
+```
 
 ## Related
 
