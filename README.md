@@ -128,9 +128,9 @@ or `AGENT_SOCKET`.
 
 ## Configuration
 
-Every option is a flag with an environment variable. The agent also accepts
-configuration over the protocol (`on_configure`), but Zentinel 0.6.50 does not
-forward an `agent { config { ... } }` block, so set it here.
+Every option is a flag with an environment variable. An `agent { config { ... } }`
+block in the Zentinel configuration can override them; see
+[Configuration from Zentinel](#configuration-from-zentinel).
 
 | Option | Default | Meaning |
 |---|---|---|
@@ -156,6 +156,44 @@ its environment variable, e.g. `BLOCK_MODE=false` or `JAILBREAK_DETECTION=false`
 
 The model allowlist, the token limit and rate limits block even with
 `--block-mode` off.
+
+### Configuration from Zentinel
+
+Zentinel releases that include zentinelproxy/zentinel#603 send the agent's
+`config { }` block on every connection: once for each pooled connection at
+startup, and again on every reconnect. The agent applies it by one rule:
+
+- **Merge, don't replace.** The block overlays the flags and environment the
+  agent was started with. A key the block leaves out keeps its flag value; the
+  same block always yields the same settings.
+- **Idempotent.** A block identical to the one already applied (compared by a
+  hash of its canonical JSON) changes nothing. When a block does change
+  settings, rate-limit usage carries over: clients keep what they have used in
+  the current window, and only the limits change. A reconnect never hands a
+  client a fresh allowance.
+- **Strict.** An unknown key (a typo such as `rate-limit-request`), a value of
+  the wrong type, an invalid `pii-action`, or an `allowed-models` value with no
+  usable entries rejects the whole block: the agent answers the Configure with
+  failure, keeps its current settings and logs the reason.
+- **No secrets in logs.** The agent logs the block's hash and the names of the
+  keys whose value changed, never the block itself.
+
+Keys (all optional): `prompt-injection-enabled`, `pii-detection-enabled`,
+`pii-action`, `jailbreak-detection-enabled`, `schema-validation-enabled`,
+`max-tokens-per-request` (`0` = no limit), `add-cost-headers`,
+`allowed-models` (one string, comma-separated, or several arguments),
+`block-mode`, `fail-open`, `rate-limit-requests`, `rate-limit-tokens`.
+
+```kdl
+agent "ai-gateway" type="custom" {
+    unix-socket "/tmp/zentinel-ai-gateway.sock"
+    config {
+        pii-action "block"
+        allowed-models "gpt-4o" "claude-3-5-sonnet"
+        rate-limit-requests 60
+    }
+}
+```
 
 Full reference: <https://registry.zentinelproxy.io/ai-gateway/>
 

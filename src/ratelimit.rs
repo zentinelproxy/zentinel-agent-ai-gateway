@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 
 /// Rate limiter configuration
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RateLimitConfig {
     /// Maximum requests per minute per client (0 = unlimited)
     pub requests_per_minute: u32,
@@ -158,6 +158,20 @@ impl RateLimiter {
             config,
             state: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    /// The limits this limiter enforces.
+    pub fn config(&self) -> &RateLimitConfig {
+        &self.config
+    }
+
+    /// Change the limits, keeping every client's usage in its current window.
+    ///
+    /// Reconfiguring must not hand clients a fresh allowance: the proxy sends
+    /// the agent's configuration on every connection, so a limiter rebuilt on
+    /// each configure would be reset by every reconnect.
+    pub fn set_config(&mut self, config: RateLimitConfig) {
+        self.config = config;
     }
 
     /// Check if a request is allowed and record it
