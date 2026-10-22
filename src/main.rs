@@ -12,7 +12,7 @@ use zentinel_agent_protocol::v2::{GrpcAgentServerV2, UdsAgentServerV2};
 /// Provides security controls for AI API requests including prompt injection
 /// detection, PII filtering, jailbreak detection, and usage controls.
 #[derive(Parser, Debug)]
-#[command(name = "zentinel-agent-ai-gateway")]
+#[command(name = "zentinel-ai-gateway-agent")]
 #[command(version, about, long_about = None)]
 struct Args {
     /// Unix socket path for agent communication (UDS transport)
