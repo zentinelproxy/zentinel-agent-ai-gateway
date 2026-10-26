@@ -95,11 +95,11 @@ with `request_headers` alone it allows everything.
 
 ## Install
 
-Not in the Zentinel bundle yet: `zentinel bundle install ai-gateway` fails
-because the repository has no releases. The release workflow now builds
-`zentinel-ai-gateway-agent-<version>-<platform>.tar.gz` for `linux-x86_64`,
-`linux-aarch64` and `darwin-aarch64` (the names the bundle downloads), so the
-first tag (`v0.3.0`) makes it bundleable.
+In the Zentinel bundle from 26.10_8: `zentinel bundle install ai-gateway`
+installs the `0.3.0` release the bundle lock pins, built from its tag and
+smoke-tested behind a real Zentinel for `linux-x86_64`, `linux-aarch64` and
+`darwin-aarch64`. Zentinel binaries up to 0.6.50 (26.10_7) keep a compiled-in
+lock that does not list ai-gateway, so there the command fails.
 
 ### From source (recommended)
 
@@ -162,9 +162,10 @@ The model allowlist, the token limit and rate limits block even with
 
 ### Configuration from Zentinel
 
-Zentinel releases that include zentinelproxy/zentinel#603 send the agent's
-`config { }` block on every connection: once for each pooled connection at
-startup, and again on every reconnect. The agent applies it by one rule:
+Zentinel 26.10_8 and later send the agent's `config { }` block on every
+connection: once for each pooled connection at startup, and again on every
+reconnect (releases up to 0.6.50 never delivered it). The agent must answer
+each one; it applies the block by one rule:
 
 - **Merge, don't replace.** The block overlays the flags and environment the
   agent was started with. A key the block leaves out keeps its flag value; the
@@ -177,7 +178,9 @@ startup, and again on every reconnect. The agent applies it by one rule:
 - **Strict.** An unknown key (a typo such as `rate-limit-request`), a value of
   the wrong type, an invalid `pii-action`, or an `allowed-models` value with no
   usable entries rejects the whole block: the agent answers the Configure with
-  failure, keeps its current settings and logs the reason.
+  failure, keeps its current settings and logs the reason. The proxy then does
+  not use the agent (the connection fails with an ERROR log and is retried;
+  meanwhile its filters' `failure-mode` applies, `closed` answering 503).
 - **No secrets in logs.** The agent logs the block's hash and the names of the
   keys whose value changed, never the block itself.
 
@@ -239,13 +242,19 @@ Headers the agent returns:
 Every decision is made in the request-body phase, so what the agent can do
 depends on the proxy:
 
-- Zentinel 26.10_7 (0.6.50) sends request bodies to agents only when the
-  config has a `waf` block, and rejects a `waf` block whose mode is not `off`.
-  In practice the agent sees headers only and blocks nothing.
-- Zentinel `main` (after zentinelproxy/zentinel#609) sends the body and acts
-  on a block (status code, audit tags), but has already opened the upstream
-  request, so the upstream receives the request headers of a blocked request.
-  The headers above are not applied to an allowed request.
+- Up to Zentinel 26.10_7 (0.6.50), request bodies reached agents only when
+  the config had a `waf` block, and a `waf` block whose mode was not `off` was
+  rejected. In practice the agent saw headers only and blocked nothing.
+- From Zentinel 26.10_8, the body goes to every route agent subscribed to
+  `request_body`, with or without a `waf` block (`inspect-request-body #false`
+  keeps it away), and is held back from the upstream until the agent allows
+  it; a block is acted on (status code, audit tags). The upstream still
+  receives the request line and headers of a blocked request before the body
+  decision (zentinelproxy/zentinel#608). Of the headers above, the response
+  headers (`X-RateLimit-*`) reach the client on an allowed request; the
+  request headers (`X-AI-Gateway-*`) are set on the body phase, after the
+  upstream request's headers have gone out, so they are dropped with a
+  warning.
 
 The agent reports counters (`ai_gateway_requests_total`,
 `ai_gateway_requests_blocked_total`, `ai_gateway_prompt_injection_detections_total`,
